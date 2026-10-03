@@ -1,0 +1,16 @@
+# Geliştirme veritabanı. Çalıştırma: podman-compose up -d   (veya docker compose up -d)
+services:
+  postgres:
+    image: docker.io/library/postgres:17
+    container_name: uretim-postgres
+    environment:
+      POSTGRES_USER: uretim
+      POSTGRES_PASSWORD: uretim
+      POSTGRES_DB: uretim
+    ports:
+      - "5434:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

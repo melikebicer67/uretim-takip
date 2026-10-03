@@ -1,0 +1,242 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ── Tanımlar ─────────────────────────────────────────────────
+
+enum ItemType {
+  RAW // hammadde / yarı mamul
+  PRODUCT // mamul
+}
+
+// Malzeme kartı. code LOGO kalem kodu formatında: 1.20260001 (hammadde), 3.202600035 (mamul)
+model Item {
+  id        Int      @id @default(autoincrement())
+  code      String   @unique
+  name      String
+  type      ItemType
+  unit      String   @default("ADET")
+  unitPrice Decimal  @default(0) @db.Decimal(12, 2)
+  createdAt DateTime @default(now())
+
+  stocks         Stock[]
+  movements      StockMovement[]
+  bomAsProduct   BomLine[]       @relation("BomProduct")
+  bomAsComponent BomLine[]       @relation("BomComponent")
+  workOrders     WorkOrder[]
+}
+
+enum WarehouseKind {
+  RAW // hammadde depo
+  WIP // üretim depo
+  FINISHED // mamul depo
+}
+
+model Warehouse {
+  id   Int           @id @default(autoincrement())
+  code String        @unique
+  name String
+  kind WarehouseKind @unique
+
+  stocks        Stock[]
+  movementsFrom StockMovement[] @relation("MovementFrom")
+  movementsTo   StockMovement[] @relation("MovementTo")
+}
+
+enum StageKind {
+  ASSEMBLY // montaj aşaması, reçete kalemi tüketir
+  TEST // fonksiyonel ve stres testleri
+  QUALITY // kalite onayı, kabulde mamul depoya girer
+}
+
+// Rota aşaması (iş istasyonu)
+model Stage {
+  id       Int       @id @default(autoincrement())
+  code     String    @unique
+  name     String
+  sequence Int       @unique
+  kind     StageKind
+
+  workers    Worker[]
+  bomLines   BomLine[]
+  operations Operation[]
+  units      ProductionUnit[]
+}
+
+// Aylık maaş üzerinden saniye maliyeti hesaplanır: maaş / 225 saat / 3600
+model Worker {
+  id            Int      @id @default(autoincrement())
+  name          String
+  stageId       Int
+  stage         Stage    @relation(fields: [stageId], references: [id])
+  monthlySalary Decimal  @db.Decimal(12, 2)
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  operations Operation[]
+}
+
+// Reçete satırı: hangi bileşen, hangi aşamada, birim mamul başına kaç adet
+model BomLine {
+  id          Int     @id @default(autoincrement())
+  productId   Int
+  product     Item    @relation("BomProduct", fields: [productId], references: [id])
+  componentId Int
+  component   Item    @relation("BomComponent", fields: [componentId], references: [id])
+  stageId     Int
+  stage       Stage   @relation(fields: [stageId], references: [id])
+  quantity    Decimal @db.Decimal(12, 3)
+
+  @@unique([productId, componentId])
+}
+
+// ── Stok ─────────────────────────────────────────────────────
+
+model Stock {
+  warehouseId Int
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id])
+  itemId      Int
+  item        Item      @relation(fields: [itemId], references: [id])
+  quantity    Decimal   @default(0) @db.Decimal(12, 3)
+
+  @@id([warehouseId, itemId])
+}
+
+enum MovementType {
+  RECEIPT // satın alma / hammadde girişi
+  TRANSFER // depolar arası (hammadde → üretim)
+  CONSUME // üretimde sarf
+  PRODUCE // mamul girişi
+}
+
+model StockMovement {
+  id              Int             @id @default(autoincrement())
+  type            MovementType
+  itemId          Int
+  item            Item            @relation(fields: [itemId], references: [id])
+  quantity        Decimal         @db.Decimal(12, 3)
+  fromWarehouseId Int?
+  fromWarehouse   Warehouse?      @relation("MovementFrom", fields: [fromWarehouseId], references: [id])
+  toWarehouseId   Int?
+  toWarehouse     Warehouse?      @relation("MovementTo", fields: [toWarehouseId], references: [id])
+  workOrderId     Int?
+  workOrder       WorkOrder?      @relation(fields: [workOrderId], references: [id])
+  unitId          Int?
+  unit            ProductionUnit? @relation(fields: [unitId], references: [id])
+  note            String?
+  at              DateTime        @default(now())
+
+  @@index([at])
+}
+
+// ── Üretim ───────────────────────────────────────────────────
+
+enum WorkOrderStatus {
+  PLANNED // oluşturuldu, malzeme henüz transfer edilmedi
+  RELEASED // malzeme üretim deposuna transfer edildi, seri numaraları verildi
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+model WorkOrder {
+  id          Int             @id @default(autoincrement())
+  no          String          @unique // UE-2026-0001
+  productId   Int
+  product     Item            @relation(fields: [productId], references: [id])
+  quantity    Int
+  status      WorkOrderStatus @default(PLANNED)
+  dueDate     DateTime?
+  note        String?
+  createdAt   DateTime        @default(now())
+  releasedAt  DateTime?
+  completedAt DateTime?
+
+  units     ProductionUnit[]
+  movements StockMovement[]
+}
+
+enum UnitStatus {
+  WAITING // aşamada sırada
+  IN_PROCESS // bir operatör çalışıyor
+  COMPLETED // kalite kabul, mamul depoda
+  SCRAPPED
+}
+
+// Seri numaralı tek mamul. Her bilgisayar rotayı ayrı ayrı dolaşır.
+model ProductionUnit {
+  id             Int        @id @default(autoincrement())
+  serialNo       String     @unique // PC-2026-000001
+  workOrderId    Int
+  workOrder      WorkOrder  @relation(fields: [workOrderId], references: [id])
+  currentStageId Int?
+  currentStage   Stage?     @relation(fields: [currentStageId], references: [id])
+  status         UnitStatus @default(WAITING)
+  reworkCount    Int        @default(0)
+  createdAt      DateTime   @default(now())
+  completedAt    DateTime?
+
+  operations  Operation[]
+  inspections Inspection[]
+  movements   StockMovement[]
+
+  @@index([currentStageId, status])
+}
+
+enum OperationResult {
+  DONE
+  PASSED
+  FAILED
+}
+
+// Operatörün bir birim üzerindeki çalışması. İşçilik maliyeti = süre × saniye maaşı
+model Operation {
+  id          Int              @id @default(autoincrement())
+  unitId      Int
+  unit        ProductionUnit   @relation(fields: [unitId], references: [id])
+  stageId     Int
+  stage       Stage            @relation(fields: [stageId], references: [id])
+  workerId    Int
+  worker      Worker           @relation(fields: [workerId], references: [id])
+  startedAt   DateTime         @default(now())
+  finishedAt  DateTime?
+  durationSec Int?
+  laborCost   Decimal?         @db.Decimal(12, 4)
+  result      OperationResult?
+  note        String?
+
+  inspection Inspection?
+
+  @@index([unitId])
+  @@index([workerId])
+}
+
+enum InspectionDecision {
+  ACCEPT
+  REJECT
+}
+
+// QA-LP-2026-01 kalite kontrol formu. answers: { [kriterKodu]: { ok: boolean, note?: string } }
+model Inspection {
+  id           Int                @id @default(autoincrement())
+  unitId       Int
+  unit         ProductionUnit     @relation(fields: [unitId], references: [id])
+  operationId  Int                @unique
+  operation    Operation          @relation(fields: [operationId], references: [id])
+  kind         StageKind
+  answers      Json
+  measurements Json? // { batteryHealth, maxCpuTemp }
+  decision     InspectionDecision
+  inspector    String
+  approver     String?
+  createdAt    DateTime           @default(now())
+
+  @@index([unitId])
+}
