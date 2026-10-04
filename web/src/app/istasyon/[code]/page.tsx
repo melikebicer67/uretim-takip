@@ -1,16 +1,17 @@
 "use client";
 
-import { ArrowRight, Check, Play, Undo2, User, Wrench } from "lucide-react";
+import { ArrowRight, Check, Play, ScanBarcode, Sparkles, Undo2, User, Wrench } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
-import { Badge, Card, ErrorBox, Loading, PageHeader, btn, table } from "@/components/ui";
+import { useRef, useState } from "react";
+import { Badge, Card, ErrorBox, Loading, PageHeader, btn, input, table } from "@/components/ui";
 import { post, type Station } from "@/lib/api";
 import { RESULT, clock, duration, time, tl } from "@/lib/format";
 import { useLive, useNow } from "@/lib/live";
 import { InspectionForm } from "./inspection-form";
 
-type Active = NonNullable<Station["queue"][number]["operation"]> & { unitId: number; serialNo: string };
+type Active = NonNullable<Station["queue"][number]["operation"]> & { unitId: number; serialNo: string; installed: string[] };
+type SerialInput = { itemCode: string; serialNo: string };
 
 export default function StationPage() {
   const { code } = useParams<{ code: string }>();
@@ -40,13 +41,13 @@ export default function StationPage() {
   const waiting = data.queue.filter((u) => u.status === "WAITING");
   const active: Active[] = data.queue
     .filter((u) => u.operation)
-    .map((u) => ({ ...u.operation!, unitId: u.id, serialNo: u.serialNo }));
+    .map((u) => ({ ...u.operation!, unitId: u.id, serialNo: u.serialNo, installed: u.installed }));
   const isAssembly = data.stage.kind === "ASSEMBLY";
 
-  function finish(op: Active) {
+  function finish(op: Active, componentSerials: SerialInput[]) {
     if (!isAssembly) return setInspecting(op);
     return run(async () => {
-      const r = await post<{ movedTo: { name: string } | null }>(`/operations/${op.id}/finish`, {});
+      const r = await post<{ movedTo: { name: string } | null }>(`/operations/${op.id}/finish`, { componentSerials });
       setFlash(`${op.serialNo} → ${r.movedTo?.name ?? "Mamul Depo"} aktarıldı`);
     });
   }
@@ -97,7 +98,7 @@ export default function StationPage() {
               op={op}
               components={isAssembly ? data.components : []}
               busy={busy}
-              onFinish={() => finish(op)}
+              onFinish={(serials) => finish(op, serials)}
               onCancel={() => run(() => post(`/operations/${op.id}/cancel`))}
               finishLabel={isAssembly ? `Bitir → ${data.next?.name ?? "Mamul Depo"}` : "Kontrol formunu doldur"}
             />
@@ -215,12 +216,33 @@ function ActiveCard({ op, components, busy, onFinish, onCancel, finishLabel }: {
   op: Active;
   components: Station["components"];
   busy: boolean;
-  onFinish: () => void;
+  onFinish: (serials: SerialInput[]) => void;
   onCancel: () => void;
   finishLabel: string;
 }) {
   const now = useNow();
   const elapsed = (now - new Date(op.startedAt).getTime()) / 1000;
+  // Seri takipli her parça adedi için bir alan; tamirden dönen üründe takılı parçalar atlanır
+  const slots = components
+    .filter((c) => c.serialTracked && !op.installed.includes(c.code))
+    .flatMap((c) => Array.from({ length: c.quantity }, (_, i) => ({ key: `${c.code}#${i}`, code: c.code, name: c.name })));
+  const reinstall = components.length > 0 && components.every((c) => op.installed.includes(c.code));
+  const [serials, setSerials] = useState<Record<string, string>>({});
+  const refs = useRef<(HTMLInputElement | null)[]>([]);
+  const filled = slots.every((s) => serials[s.key]?.trim());
+
+  function submit() {
+    if (!filled) return;
+    onFinish(slots.map((s) => ({ itemCode: s.code, serialNo: serials[s.key].trim() })));
+  }
+
+  function autofill() {
+    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const gen = (code: string) =>
+      `${code.split(".").at(-1)}-${Array.from({ length: 6 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join("")}`;
+    setSerials(Object.fromEntries(slots.map((s) => [s.key, serials[s.key] || gen(s.code)])));
+  }
+
   return (
     <div className="rounded-xl border-2 border-amber-300 bg-amber-50 p-5 shadow-sm">
       <div className="flex items-start justify-between gap-4">
@@ -233,15 +255,47 @@ function ActiveCard({ op, components, busy, onFinish, onCancel, finishLabel }: {
           <div className="text-xs text-amber-800">İşçilik {tl(elapsed * op.worker.perSecond)}</div>
         </div>
       </div>
-      {components.length > 0 && (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {components.map((c) => (
-            <span key={c.code} className="rounded-md bg-white px-2 py-1 text-xs ring-1 ring-amber-200">{c.quantity} × {c.name}</span>
+
+      {slots.length > 0 && (
+        <div className="mt-4 space-y-2">
+          <div className="flex items-center justify-between text-xs font-medium text-amber-900">
+            <span className="flex items-center gap-1"><ScanBarcode size={14} /> Takılan parçaların seri numarasını okutun</span>
+            <button type="button" onClick={autofill} className="inline-flex items-center gap-1 rounded px-2 py-1 text-amber-800 hover:bg-amber-100">
+              <Sparkles size={12} /> Demo: otomatik doldur
+            </button>
+          </div>
+          {slots.map((slot, i) => (
+            <label key={slot.key} className="flex items-center gap-3">
+              <span className="w-32 shrink-0 text-sm">{slot.name}</span>
+              <input
+                ref={(el) => {
+                  refs.current[i] = el;
+                }}
+                autoFocus={i === 0}
+                className={`${input} font-mono uppercase`}
+                placeholder="Seri no"
+                value={serials[slot.key] ?? ""}
+                onChange={(e) => setSerials((s) => ({ ...s, [slot.key]: e.target.value }))}
+                onKeyDown={(e) => {
+                  // Barkod okuyucu Enter gönderir: sonraki alana geç, son alanda bitir
+                  if (e.key !== "Enter") return;
+                  e.preventDefault();
+                  if (i < slots.length - 1) refs.current[i + 1]?.focus();
+                  else submit();
+                }}
+              />
+            </label>
           ))}
         </div>
       )}
+      {reinstall && (
+        <p className="mt-4 rounded-md bg-white px-3 py-2 text-xs text-amber-900 ring-1 ring-amber-200">
+          Tamir dönüşü: bu aşamanın parçaları daha önce takıldı, seri numaraları kayıtlı.
+        </p>
+      )}
+
       <div className="mt-5 flex gap-2">
-        <button className={`${btn.success} flex-1 py-3 text-base`} disabled={busy} onClick={onFinish}>
+        <button className={`${btn.success} flex-1 py-3 text-base`} disabled={busy || !filled} onClick={submit}>
           {finishLabel} <ArrowRight size={18} />
         </button>
         <button className={btn.ghost} disabled={busy} onClick={onCancel} title="Yanlışlıkla başlatıldıysa geri al">

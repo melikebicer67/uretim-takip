@@ -80,7 +80,7 @@ async function main() {
     const item = await prisma.item.upsert({
       where: { code: c.code },
       update: {},
-      create: { code: c.code, name: c.name, type: 'RAW', unitPrice: c.price },
+      create: { code: c.code, name: c.name, type: 'RAW', unitPrice: c.price, serialTracked: true },
     });
     await prisma.bomLine.upsert({
       where: { productId_componentId: { productId: product.id, componentId: item.id } },

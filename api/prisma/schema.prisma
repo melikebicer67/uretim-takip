@@ -18,13 +18,17 @@ enum ItemType {
 
 // Malzeme kartı. code LOGO kalem kodu formatında: 1.20260001 (hammadde), 3.202600035 (mamul)
 model Item {
-  id        Int      @id @default(autoincrement())
-  code      String   @unique
-  name      String
-  type      ItemType
-  unit      String   @default("ADET")
-  unitPrice Decimal  @default(0) @db.Decimal(12, 2)
-  createdAt DateTime @default(now())
+  id            Int      @id @default(autoincrement())
+  code          String   @unique
+  name          String
+  type          ItemType
+  unit          String   @default("ADET")
+  unitPrice     Decimal  @default(0) @db.Decimal(12, 2)
+  // true: montajda her adedin seri numarası okutulur ve takıldığı mamule bağlanır
+  serialTracked Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  componentSerials ComponentSerial[]
 
   stocks         Stock[]
   movements      StockMovement[]
@@ -183,9 +187,10 @@ model ProductionUnit {
   createdAt      DateTime   @default(now())
   completedAt    DateTime?
 
-  operations  Operation[]
-  inspections Inspection[]
-  movements   StockMovement[]
+  operations       Operation[]
+  inspections      Inspection[]
+  movements        StockMovement[]
+  componentSerials ComponentSerial[]
 
   @@index([currentStageId, status])
 }
@@ -212,7 +217,8 @@ model Operation {
   result      OperationResult?
   note        String?
 
-  inspection Inspection?
+  inspection       Inspection?
+  componentSerials ComponentSerial[]
 
   @@index([unitId])
   @@index([workerId])
@@ -238,5 +244,22 @@ model Inspection {
   approver     String?
   createdAt    DateTime           @default(now())
 
+  @@index([unitId])
+}
+
+// Parça izlenebilirliği: hangi seri numaralı parça hangi mamule, hangi operasyonda takıldı
+model ComponentSerial {
+  id          Int            @id @default(autoincrement())
+  itemId      Int
+  item        Item           @relation(fields: [itemId], references: [id])
+  serialNo    String
+  unitId      Int
+  unit        ProductionUnit @relation(fields: [unitId], references: [id])
+  operationId Int
+  operation   Operation      @relation(fields: [operationId], references: [id])
+  installedAt DateTime       @default(now())
+
+  @@unique([itemId, serialNo])
+  @@index([serialNo])
   @@index([unitId])
 }

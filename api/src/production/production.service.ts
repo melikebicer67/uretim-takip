@@ -8,7 +8,13 @@ import { LIMITS, itemCodes } from './checklists.js';
 
 type Tx = Prisma.TransactionClient;
 
+export interface ComponentSerialInput {
+  itemCode: string;
+  serialNo: string;
+}
+
 export interface FinishInput {
+  componentSerials?: ComponentSerialInput[];
   answers?: Record<string, { ok: boolean; note?: string }>;
   measurements?: { batteryHealth?: number; maxCpuTemp?: number };
   decision?: 'ACCEPT' | 'REJECT';
@@ -50,6 +56,7 @@ export class ProductionService {
         include: {
           workOrder: { include: { product: true } },
           operations: { where: { finishedAt: null }, include: { worker: true } },
+          movements: { where: { type: 'CONSUME' }, select: { item: { select: { code: true } } } },
         },
       }),
       this.prisma.operation.findMany({
@@ -81,6 +88,7 @@ export class ProductionService {
         code: b.component.code,
         name: b.component.name,
         quantity: num(b.quantity),
+        serialTracked: b.component.serialTracked,
       })),
       workers: stage.workers.map((w) => {
         const salary = num(w.monthlySalary);
@@ -102,6 +110,8 @@ export class ProductionService {
           reworkCount: u.reworkCount,
           workOrderNo: u.workOrder.no,
           product: u.workOrder.product.name,
+          // Tamirden dönen birimde bu aşamanın parçaları zaten takılı; tekrar seri no istenmez
+          installed: u.movements.map((m) => m.item.code),
           operation: op
             ? {
                 id: op.id,
@@ -206,7 +216,9 @@ export class ProductionService {
         select: { itemId: true },
       });
       const done = new Set(consumed.map((m) => m.itemId));
-      for (const line of bom.filter((b) => !done.has(b.componentId))) {
+      const pending = bom.filter((b) => !done.has(b.componentId));
+      await this.recordSerials(tx, op, pending, input.componentSerials ?? [], finishedAt);
+      for (const line of pending) {
         await this.stock.move(tx, {
           type: 'CONSUME',
           itemId: line.componentId,
@@ -328,6 +340,47 @@ export class ProductionService {
     };
   }
 
+  // Takılan her seri takipli parçanın seri numarasını mamule bağlar
+  private async recordSerials(
+    tx: Tx,
+    op: ActiveOp,
+    lines: { componentId: number; quantity: Prisma.Decimal }[],
+    input: ComponentSerialInput[],
+    installedAt: Date,
+  ) {
+    const items = await tx.item.findMany({ where: { id: { in: lines.map((l) => l.componentId) } } });
+    const byId = new Map(items.map((i) => [i.id, i]));
+    const rows: { itemId: number; serialNo: string }[] = [];
+    for (const line of lines) {
+      const item = byId.get(line.componentId)!;
+      if (!item.serialTracked) continue;
+      const serials = input
+        .filter((s) => s.itemCode === item.code)
+        .map((s) => s.serialNo.trim().toUpperCase())
+        .filter(Boolean);
+      const required = num(line.quantity);
+      if (serials.length !== required) {
+        throw new BadRequestException(`${item.name} için ${required} adet seri numarası girilmeli`);
+      }
+      if (new Set(serials).size !== serials.length) {
+        throw new BadRequestException(`${item.name} için aynı seri numarası iki kez girildi`);
+      }
+      rows.push(...serials.map((serialNo) => ({ itemId: item.id, serialNo })));
+    }
+    if (!rows.length) return;
+    const taken = await tx.componentSerial.findMany({
+      where: { OR: rows.map((r) => ({ itemId: r.itemId, serialNo: r.serialNo })) },
+      include: { item: true, unit: true },
+    });
+    if (taken.length) {
+      const t = taken[0];
+      throw new BadRequestException(`${t.item.name} ${t.serialNo} zaten ${t.unit.serialNo} üzerinde takılı`);
+    }
+    await tx.componentSerial.createMany({
+      data: rows.map((r) => ({ ...r, unitId: op.unitId, operationId: op.id, installedAt })),
+    });
+  }
+
   private async reworkTarget(tx: Tx, from: Stage, code?: string) {
     const candidates = await tx.stage.findMany({
       where: { kind: 'ASSEMBLY', sequence: { lt: from.sequence } },
@@ -351,6 +404,7 @@ export class ProductionService {
           include: { stage: true, worker: true, inspection: true },
         },
         movements: { include: { item: true, fromWarehouse: true, toWarehouse: true }, orderBy: { at: 'asc' } },
+        componentSerials: { include: { operation: { include: { worker: true, stage: true } } }, orderBy: { id: 'asc' } },
       },
     });
     if (!unit) throw new NotFoundException('Seri numarası bulunamadı');
@@ -364,6 +418,14 @@ export class ProductionService {
         unitPrice: num(m.item.unitPrice),
         cost: num(m.quantity) * num(m.item.unitPrice),
         at: m.at,
+        serials: unit.componentSerials
+          .filter((c) => c.itemId === m.itemId)
+          .map((c) => ({
+            serialNo: c.serialNo,
+            installedAt: c.installedAt,
+            stage: c.operation.stage.name,
+            worker: c.operation.worker.name,
+          })),
       }));
     const operations = unit.operations.map((op) => ({
       id: op.id,
@@ -409,6 +471,49 @@ export class ProductionService {
         workSeconds: operations.reduce((s, o) => s + (o.durationSec ?? 0), 0),
       },
     };
+  }
+
+  // Seri no ile arama: önce mamul, bulunamazsa parça seri numarası
+  async trace(q: string) {
+    const term = q.trim().toUpperCase();
+    if (!term) return { unit: null, components: [] };
+    const unit = await this.prisma.productionUnit.findUnique({ where: { serialNo: term } });
+    if (unit) return { unit: unit.serialNo, components: [] };
+    const exact = await this.componentSerials(term, true);
+    return { unit: null, components: exact.length ? exact : await this.componentSerials(term, false) };
+  }
+
+  async componentSerials(q?: string, exact = false) {
+    const term = q?.trim().toUpperCase();
+    const rows = await this.prisma.componentSerial.findMany({
+      where: !term
+        ? undefined
+        : exact
+          ? { serialNo: term }
+          : {
+              OR: [
+                { serialNo: { contains: term } },
+                { item: { name: { contains: q!.trim(), mode: 'insensitive' } } },
+                { item: { code: { contains: term } } },
+              ],
+            },
+      orderBy: { id: 'desc' },
+      take: 500,
+      include: {
+        item: true,
+        unit: { include: { workOrder: true } },
+        operation: { include: { worker: true, stage: true } },
+      },
+    });
+    return rows.map((r) => ({
+      serialNo: r.serialNo,
+      item: { code: r.item.code, name: r.item.name },
+      unit: { serialNo: r.unit.serialNo, status: r.unit.status },
+      workOrderNo: r.unit.workOrder.no,
+      stage: r.operation.stage.name,
+      worker: r.operation.worker.name,
+      installedAt: r.installedAt,
+    }));
   }
 
   async units() {
@@ -498,7 +603,20 @@ export class ProductionService {
               data: { unitId: u.id, stageId: stage.id, workerId: worker.id, startedAt: started },
               include: activeOpInclude,
             });
-            await this.complete(tx, op, new Date(cursor), simulatedAnswers(stage.kind));
+            const input = simulatedAnswers(stage.kind);
+            if (stage.kind === 'ASSEMBLY') {
+              const lines = await tx.bomLine.findMany({
+                where: { productId: order.productId, stageId: stage.id },
+                include: { component: true },
+              });
+              input.componentSerials = lines.flatMap((l) =>
+                Array.from({ length: num(l.quantity) }, () => ({
+                  itemCode: l.component.code,
+                  serialNo: demoSerial(l.component.code),
+                })),
+              );
+            }
+            await this.complete(tx, op, new Date(cursor), input);
           }
         },
         { timeout: 30_000 },
@@ -509,6 +627,13 @@ export class ProductionService {
     this.events.emit({ type: 'stock' });
     return { simulated: order.units.length };
   }
+}
+
+// Demo için tedarikçi etiketine benzeyen seri no: 20260003-7K2Q9P
+export function demoSerial(itemCode: string) {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const tail = Array.from({ length: 6 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
+  return `${itemCode.split('.').at(-1)}-${tail}`;
 }
 
 function rand(min: number, max: number) {

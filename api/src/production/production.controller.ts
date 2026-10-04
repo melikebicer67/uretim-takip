@@ -1,6 +1,6 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
 import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsNumber, IsObject, IsOptional, IsString, Max, Min, ValidateNested } from 'class-validator';
+import { IsArray, IsIn, IsInt, IsNumber, IsObject, IsOptional, IsString, Max, Min, ValidateNested } from 'class-validator';
 import { ProductionService } from './production.service.js';
 
 class StartDto {
@@ -25,7 +25,21 @@ class MeasurementsDto {
   maxCpuTemp?: number;
 }
 
+class ComponentSerialDto {
+  @IsString()
+  itemCode: string;
+
+  @IsString()
+  serialNo: string;
+}
+
 class FinishDto {
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => ComponentSerialDto)
+  componentSerials?: ComponentSerialDto[];
+
   @IsOptional()
   @IsObject()
   answers?: Record<string, { ok: boolean; note?: string }>;
@@ -74,6 +88,16 @@ export class ProductionController {
   @Post('operations/:id/cancel')
   cancel(@Param('id', ParseIntPipe) id: number) {
     return this.production.cancelOperation(id);
+  }
+
+  @Get('trace')
+  trace(@Query('q') q = '') {
+    return this.production.trace(q);
+  }
+
+  @Get('component-serials')
+  componentSerials(@Query('q') q?: string) {
+    return this.production.componentSerials(q);
   }
 
   @Get('units')

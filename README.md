@@ -41,7 +41,10 @@ Demo öncesi temiz başlangıç (Excel'deki stoklar, boş üretim/mamul depo): `
 4. **Test**: QA-LP-2026-01 formu bölüm 3–4 (fonksiyonel + burn-in). Kalan ürün seçilen montaj aşamasına tamire döner
    (malzeme tekrar düşülmez).
 5. **Kalite**: bölüm 2, 5, 6. KABUL edilen ürün Mamul Depo'ya girer.
-6. **Maliyet**: malzeme (sarf × fiyat) + işçilik (süre × saniye maaşı; maaş / 225 sa / 3600).
+6. **Parça izlenebilirliği**: montajda takılan her parçanın (anakart, RAM, SSD…) seri numarası okutulur ve
+   bilgisayarın seri numarasına bağlanır. Soldaki aramaya parça seri no yazılınca takıldığı bilgisayar açılır;
+   **Seri Numaraları → Parça seri no** sekmesi tüm eşleşmeleri listeler. Aynı parça iki bilgisayara takılamaz.
+7. **Maliyet**: malzeme (sarf × fiyat) + işçilik (süre × saniye maaşı; maaş / 225 sa / 3600).
 
 İş emri sayfasındaki **Demo: simüle et** düğmesi bekleyen ürünleri gerçekçi sürelerle tüm rotadan geçirir.
 Ürün sayfasından (`/urun/<seri no>`) doldurulmuş kalite formu yazdırılabilir.

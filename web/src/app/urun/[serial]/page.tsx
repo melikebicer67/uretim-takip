@@ -2,7 +2,7 @@
 
 import { Printer } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { Badge, Card, ErrorBox, Loading, PageHeader, Stat, btn, table } from "@/components/ui";
 import type { Answers, Checklists, UnitDetail } from "@/lib/api";
 import { RESULT, UNIT_STATUS, dt, duration, time, tl } from "@/lib/format";
@@ -10,6 +10,8 @@ import { useLive } from "@/lib/live";
 
 export default function UnitPage() {
   const { serial } = useParams<{ serial: string }>();
+  // Parça seri no aramasından gelindiyse o parça vurgulanır
+  const highlight = useSearchParams().get("parca")?.toUpperCase();
   const { data, error } = useLive<UnitDetail>(`/units/${encodeURIComponent(decodeURIComponent(serial))}`);
   const checklists = useLive<Checklists>("/checklists");
 
@@ -88,15 +90,30 @@ export default function UnitPage() {
               )}
             </ol>
           </Card>
-          <Card title="Takılan bileşenler">
+          <Card title="Takılan parçalar ve seri numaraları">
             <table className={table.table}>
               <tbody>
-                {data.components.map((c) => (
-                  <tr key={c.code}>
-                    <td className={table.td}>{c.name}<div className="font-mono text-[11px] text-zinc-400">{c.code}</div></td>
-                    <td className={table.num}>{tl(c.cost)}</td>
-                  </tr>
-                ))}
+                {data.components.map((c) => {
+                  const hit = c.serials.some((x) => x.serialNo === highlight);
+                  return (
+                    <tr key={c.code} className={hit ? "bg-amber-100" : ""}>
+                      <td className={table.td}>
+                        {c.name} <span className="font-mono text-[11px] text-zinc-400">{c.code}</span>
+                        {c.serials.length === 0 ? (
+                          <div className="text-[11px] text-zinc-400">Seri no kaydı yok</div>
+                        ) : (
+                          c.serials.map((x) => (
+                            <div key={x.serialNo} className="mt-0.5 text-[11px]">
+                              <span className={`font-mono ${x.serialNo === highlight ? "font-bold text-amber-900" : "text-zinc-700"}`}>S/N {x.serialNo}</span>
+                              <span className="text-zinc-400"> · {x.stage}, {x.worker}</span>
+                            </div>
+                          ))
+                        )}
+                      </td>
+                      <td className={`${table.num} align-top`}>{tl(c.cost)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
               <tfoot>
                 <tr>
@@ -124,10 +141,7 @@ function PrintableForm({ unit, checklists }: { unit: UnitDetail; checklists: Che
     unit.operations.filter((o) => o.inspection?.kind === kind).at(-1)?.inspection ?? null;
   const test = last("TEST");
   const quality = last("QUALITY");
-  const comp = (name: string) => {
-    const c = unit.components.find((x) => x.name === name);
-    return c ? `${c.name} (${c.code})` : "—";
-  };
+  const sn = (name: string) => unit.components.find((x) => x.name === name)?.serials.map((x) => x.serialNo).join(", ") || "—";
   const mark = (ok: boolean | undefined) => (ok === undefined ? "[   ]" : ok ? "[ OK ]" : "[ RED ]");
 
   const sections = [...checklists.QUALITY.filter((s) => s.no === 2), ...checklists.TEST, ...checklists.QUALITY.filter((s) => s.no === 5)];
@@ -147,8 +161,10 @@ function PrintableForm({ unit, checklists }: { unit: UnitDetail; checklists: Che
             <dt className="text-zinc-500">Ürün Modeli / Serisi</dt><dd>{unit.product.name} ({unit.product.code})</dd>
             <dt className="text-zinc-500">Cihaz Seri No (S/N)</dt><dd className="font-mono">{unit.serialNo}</dd>
             <dt className="text-zinc-500">İş Emri</dt><dd className="font-mono">{unit.workOrder.no}</dd>
-            <dt className="text-zinc-500">Anakart / İşlemci</dt><dd>{comp("Anakart")} / {comp("İşlemci")}</dd>
-            <dt className="text-zinc-500">RAM / Depolama</dt><dd>{comp("RAM")} / {comp("SSD")}</dd>
+            <dt className="text-zinc-500">Anakart Seri No (UUID)</dt><dd className="font-mono">{sn("Anakart")}</dd>
+            <dt className="text-zinc-500">İşlemci (CPU)</dt><dd className="font-mono">{sn("İşlemci")}</dd>
+            <dt className="text-zinc-500">RAM</dt><dd className="font-mono">{sn("RAM")}</dd>
+            <dt className="text-zinc-500">Depolama (SSD)</dt><dd className="font-mono">{sn("SSD")}</dd>
           </dl>
         </FormSection>
 

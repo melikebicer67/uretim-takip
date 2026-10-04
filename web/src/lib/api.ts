@@ -130,7 +130,7 @@ export interface Station {
   stage: { id: number; code: string; name: string; kind: StageKind; sequence: number };
   next: { code: string; name: string } | null;
   reworkStages: { code: string; name: string }[];
-  components: { code: string; name: string; quantity: number }[];
+  components: { code: string; name: string; quantity: number; serialTracked: boolean }[];
   workers: { id: number; name: string; monthlySalary: number; perSecond: number; activeOperationId: number | null }[];
   queue: {
     id: number;
@@ -139,6 +139,7 @@ export interface Station {
     reworkCount: number;
     workOrderNo: string;
     product: string;
+    installed: string[];
     operation: { id: number; startedAt: string; worker: { id: number; name: string; perSecond: number } } | null;
   }[];
   recent: {
@@ -179,7 +180,15 @@ export interface UnitDetail {
   stage: { code: string; name: string } | null;
   workOrder: { id: number; no: string };
   product: { code: string; name: string };
-  components: { code: string; name: string; quantity: number; unitPrice: number; cost: number; at: string }[];
+  components: {
+    code: string;
+    name: string;
+    quantity: number;
+    unitPrice: number;
+    cost: number;
+    at: string;
+    serials: { serialNo: string; installedAt: string; stage: string; worker: string }[];
+  }[];
   operations: {
     id: number;
     stage: { code: string; name: string; kind: StageKind };
@@ -274,4 +283,19 @@ export interface UnitRow {
   materialCost: number;
   laborCost: number;
   totalCost: number;
+}
+
+export interface ComponentSerialRow {
+  serialNo: string;
+  item: { code: string; name: string };
+  unit: { serialNo: string; status: UnitStatus };
+  workOrderNo: string;
+  stage: string;
+  worker: string;
+  installedAt: string;
+}
+
+export interface TraceResult {
+  unit: string | null;
+  components: ComponentSerialRow[];
 }
