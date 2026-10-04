@@ -4,11 +4,13 @@
   "scripts": {
     "predev": "node scripts/check-node.mjs",
     "dev": "concurrently -k -n api,web -c blue,green \"yarn --cwd api start:dev\" \"yarn --cwd web dev\"",
-    "setup": "node scripts/check-node.mjs && cp -n api/.env.example api/.env; cp -n web/.env.example web/.env.local; podman-compose up -d && npm --prefix api install && npm --prefix web install && yarn --cwd api db:deploy && yarn --cwd api db:seed",
+    "setup": "node scripts/check-node.mjs && cp -n api/.env.example api/.env; podman-compose up -d && npm --prefix api install && npm --prefix web install && yarn --cwd api db:deploy && yarn --cwd api db:seed",
     "db:up": "podman-compose up -d",
     "db:reset": "yarn --cwd api db:reset",
     "build": "yarn --cwd api build && yarn --cwd web build",
-    "test": "yarn --cwd api test"
+    "test": "yarn --cwd api test",
+    "demo": "node scripts/check-node.mjs && yarn build && concurrently -k -n api,web -c blue,green \"yarn --cwd api start:prod\" \"yarn --cwd web start\"",
+    "tunnel": "cloudflared tunnel --url http://localhost:4000"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

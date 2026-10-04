@@ -17,6 +17,19 @@ yarn setup         # ilk sefer: veritabanı + bağımlılıklar + migrate + seed
 yarn dev           # api + web birlikte
 ```
 
+Sunum için üretim modunda (hızlı): `yarn demo`
+
+### Dışarıdan erişim (geçici link)
+
+Tarayıcı API'ye Next üzerinden (`/api`) gittiği için yalnızca 4000 portunu açmak yeterli:
+
+```bash
+yarn demo          # bir terminalde
+yarn tunnel        # diğerinde → https://<rastgele>.trycloudflare.com
+```
+
+Linkte giriş/şifre yoktur, linki alan herkes veriyi değiştirebilir; sunum bitince tüneli kapatın.
+
 Demo öncesi temiz başlangıç (Excel'deki stoklar, boş üretim/mamul depo): `yarn db:reset`
 
 ## Akış
