@@ -411,6 +411,48 @@ export class ProductionService {
     };
   }
 
+  async units() {
+    const [units, consumed] = await Promise.all([
+      this.prisma.productionUnit.findMany({
+        orderBy: { serialNo: 'desc' },
+        include: {
+          currentStage: true,
+          workOrder: { include: { product: true } },
+          operations: { select: { durationSec: true, laborCost: true, finishedAt: true, worker: { select: { name: true } } } },
+          inspections: { where: { kind: 'QUALITY', decision: 'ACCEPT' }, select: { approver: true } },
+        },
+      }),
+      this.prisma.stockMovement.findMany({
+        where: { type: 'CONSUME' },
+        select: { unitId: true, quantity: true, item: { select: { unitPrice: true } } },
+      }),
+    ]);
+    const material = new Map<number, number>();
+    for (const m of consumed) {
+      material.set(m.unitId!, (material.get(m.unitId!) ?? 0) + num(m.quantity) * num(m.item.unitPrice));
+    }
+    return units.map((u) => {
+      const labor = u.operations.reduce((s, op) => s + num(op.laborCost), 0);
+      const materialCost = material.get(u.id) ?? 0;
+      return {
+        serialNo: u.serialNo,
+        status: u.status,
+        reworkCount: u.reworkCount,
+        stage: u.currentStage ? { code: u.currentStage.code, name: u.currentStage.name } : null,
+        activeWorker: u.operations.find((op) => !op.finishedAt)?.worker.name ?? null,
+        workOrder: { id: u.workOrder.id, no: u.workOrder.no },
+        product: { code: u.workOrder.product.code, name: u.workOrder.product.name },
+        createdAt: u.createdAt,
+        completedAt: u.completedAt,
+        approver: u.inspections[0]?.approver ?? null,
+        workSeconds: u.operations.reduce((s, op) => s + (op.durationSec ?? 0), 0),
+        materialCost,
+        laborCost: labor,
+        totalCost: materialCost + labor,
+      };
+    });
+  }
+
   // ── Demo simülasyonu ───────────────────────────────────────
   // Bekleyen birimleri gerçekçi sürelerle (geçmiş tarihli) rotanın sonuna kadar yürütür
 

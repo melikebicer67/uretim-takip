@@ -76,6 +76,11 @@ export class ProductionController {
     return this.production.cancelOperation(id);
   }
 
+  @Get('units')
+  units() {
+    return this.production.units();
+  }
+
   @Get('units/:serialNo')
   unit(@Param('serialNo') serialNo: string) {
     return this.production.unit(serialNo);

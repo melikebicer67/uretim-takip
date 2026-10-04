@@ -258,3 +258,20 @@ export interface Dashboard {
     result: OperationResult;
   }[];
 }
+
+export interface UnitRow {
+  serialNo: string;
+  status: UnitStatus;
+  reworkCount: number;
+  stage: { code: string; name: string } | null;
+  activeWorker: string | null;
+  workOrder: { id: number; no: string };
+  product: { code: string; name: string };
+  createdAt: string;
+  completedAt: string | null;
+  approver: string | null;
+  workSeconds: number;
+  materialCost: number;
+  laborCost: number;
+  totalCost: number;
+}

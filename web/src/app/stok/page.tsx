@@ -4,7 +4,7 @@ import { ArrowRight, PackagePlus } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { Badge, Card, ErrorBox, Loading, PageHeader, btn, input, table } from "@/components/ui";
-import { post, type Movement, type Warehouse } from "@/lib/api";
+import { post, type Movement, type UnitRow, type Warehouse } from "@/lib/api";
 import { MOVEMENT, dt, qty, tl } from "@/lib/format";
 import { useLive } from "@/lib/live";
 
@@ -17,6 +17,8 @@ const COLORS = {
 export default function StockPage() {
   const warehouses = useLive<Warehouse[]>("/stock");
   const movements = useLive<Movement[]>("/stock/movements");
+  const units = useLive<UnitRow[]>("/units");
+  const finished = units.data?.filter((u) => u.status === "COMPLETED") ?? [];
 
   if (!warehouses.data) return warehouses.error ? <ErrorBox message={warehouses.error} /> : <Loading />;
   const list = warehouses.data;
@@ -61,7 +63,27 @@ export default function StockPage() {
                 </tbody>
               </table>
               {w.kind === "FINISHED" && (
-                <p className="px-4 py-3 text-xs text-zinc-500">Her mamul seri numarasıyla izlenir; seri numaraları iş emri detayında.</p>
+                <div className="px-4 py-3">
+                  <div className="mb-2 flex items-center justify-between text-xs font-medium uppercase tracking-wide text-zinc-500">
+                    Seri numaraları
+                    <Link href="/seri-numaralari" className="normal-case tracking-normal text-sky-700 hover:underline">Tümü →</Link>
+                  </div>
+                  {finished.length === 0 ? (
+                    <p className="text-xs text-zinc-400">Kalite onayından geçen ürünler burada listelenir.</p>
+                  ) : (
+                    <div className="flex max-h-56 flex-wrap gap-1.5 overflow-y-auto">
+                      {finished.map((u) => (
+                        <Link
+                          key={u.serialNo}
+                          href={`/urun/${u.serialNo}`}
+                          className="rounded-md bg-emerald-50 px-2 py-1 font-mono text-xs text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100"
+                        >
+                          {u.serialNo}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </section>
             {i < list.length - 1 && <ArrowRight className="hidden self-center text-zinc-300 lg:block" />}

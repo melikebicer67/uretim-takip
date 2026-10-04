@@ -1,6 +1,6 @@
 "use client";
 
-import { Boxes, ClipboardList, Factory, LayoutDashboard, ListTree, Search } from "lucide-react";
+import { Barcode, Boxes, ClipboardList, Factory, LayoutDashboard, ListTree, Search } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -10,6 +10,7 @@ const LINKS = [
   { href: "/", label: "Üretim Panosu", icon: LayoutDashboard },
   { href: "/is-emirleri", label: "İş Emirleri", icon: ClipboardList },
   { href: "/istasyon", label: "İstasyonlar", icon: Factory },
+  { href: "/seri-numaralari", label: "Seri Numaraları", icon: Barcode },
   { href: "/stok", label: "Depolar", icon: Boxes },
   { href: "/tanimlar", label: "Reçete & Rota", icon: ListTree },
 ];
